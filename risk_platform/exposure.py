@@ -21,7 +21,7 @@ def _build_exposure_fact_table(cleaned: CleanedWorkbook) -> pd.DataFrame:
     w = weights["weight"].fillna(0.0)
     weights["long_contribution"] = w.clip(lower=0.0).round(DECIMAL_PLACES)
     weights["short_contribution"] = w.clip(upper=0.0).round(DECIMAL_PLACES)
-    weights["net_contribution"] = (weights["long_contribution"] + weights["short_contribution"]).round(DECIMAL_PLACES)
+    weights["net_contribution"] = weights["weight"].round(DECIMAL_PLACES)
     weights["gross_contribution"] = w.abs().round(DECIMAL_PLACES)
     weights["weight"] = weights["weight"].round(DECIMAL_PLACES)
 

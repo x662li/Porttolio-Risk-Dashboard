@@ -19,12 +19,11 @@ from risk_platform.config import (
 )
 from risk_platform.models import LoadedWorkbook, ValidationIssue, ValidationReport
 
-SECTION_DATE_ALIGNMENT = "1. Date Alignment & Market Data Missing"
-SECTION_SECURITY_MASTER = "2. Security Master Missing Values"
-SECTION_KEY_MISSING = "3. Key Column Missing Values"
+SECTION_DATE_ALIGNMENT = "1. Date Alignment"
+SECTION_MISSING_VALUES = "2. Missing Values"
+SECTION_TICKER_COVERAGE = "3. Ticker Coverage"
 SECTION_WEIGHT_EXPOSURE = "4. Weight & Exposure Reconciliation"
 SECTION_SPLIT_SANITY = "5. Stock Split Sanity Check"
-
 
 def _add_issue(
     report: ValidationReport,
@@ -61,7 +60,7 @@ def _missing_wide_summary(df: pd.DataFrame, name: str) -> dict[str, Any]:
     by_date = missing_mask.any(axis=1)
     dates_with_missing = int(by_date.sum())
 
-    details = []
+    details: list[dict[str, str]] = []
     if missing_cells:
         stacked = missing_mask.stack()
         for (row_idx, col), is_missing in stacked.items():
@@ -69,7 +68,7 @@ def _missing_wide_summary(df: pd.DataFrame, name: str) -> dict[str, Any]:
                 details.append(
                     {
                         "date": str(df.loc[row_idx, "date"]),
-                        "column": col,
+                        "column": str(col),
                     }
                 )
 
@@ -84,9 +83,75 @@ def _missing_wide_summary(df: pd.DataFrame, name: str) -> dict[str, Any]:
     }
 
 
-def _check_date_alignment_and_missing(
-    data: LoadedWorkbook, report: ValidationReport, *, debug: bool
+def _tabular_missing_summary(df: pd.DataFrame, name: str) -> dict[str, Any]:
+    id_col = "ticker" if "ticker" in df.columns else ("date" if "date" in df.columns else None)
+    columns: dict[str, dict[str, int | str]] = {}
+    details: list[dict[str, Any]] = []
+    missing_cells = 0
+
+    for col in df.columns:
+        if col not in df.columns:
+            columns[col] = {"missing_rows": len(df), "status": "missing_column"}
+            missing_cells += len(df)
+            continue
+
+        missing_mask = df[col].isna()
+        missing_rows = int(missing_mask.sum())
+        columns[col] = {"missing_rows": missing_rows}
+        missing_cells += missing_rows
+        if missing_rows:
+            if id_col is not None:
+                keys = df.loc[missing_mask, id_col].tolist()
+                details.extend(
+                    {"column": col, id_col: str(key)} for key in keys
+                )
+            else:
+                details.extend(
+                    {"column": col, "row_index": int(idx)}
+                    for idx in df.index[missing_mask]
+                )
+
+    return {
+        "dataset": name,
+        "missing_cells": missing_cells,
+        "columns_with_missing": sum(1 for c in columns.values() if c.get("missing_rows", 0) > 0),
+        "columns": columns,
+        "details": details,
+    }
+
+
+def _report_dataset_missing(
+    report: ValidationReport,
+    name: str,
+    summary: dict[str, Any],
+    *,
+    debug: bool,
+    message_fn,
 ) -> None:
+    missing_cells = summary.get("missing_cells", 0)
+    if missing_cells == 0:
+        _add_issue(
+            report,
+            SECTION_MISSING_VALUES,
+            "info",
+            f"{name}_missing_ok",
+            f"{name}: no missing values.",
+            {k: summary[k] for k in summary if k != "details"},
+        )
+        return
+
+    context = summary if debug else {k: summary[k] for k in summary if k != "details"}
+    _add_issue(
+        report,
+        SECTION_MISSING_VALUES,
+        "warning",
+        f"{name}_missing_summary",
+        message_fn(summary),
+        context,
+    )
+
+
+def _check_date_alignment(data: LoadedWorkbook, report: ValidationReport, *, debug: bool) -> None:
     datasets = {
         "total_return_index_local": data.total_return_index_local,
         "raw_price_local": data.raw_price_local,
@@ -106,61 +171,30 @@ def _check_date_alignment_and_missing(
             f"TRI, RawPrice, and FX dates aligned ({count} days).",
             {"date_count": count},
         )
-    else:
-        context = {
-            name: {
-                "count": len(dates),
-                "only_here_count": len(dates - set.union(*(s for n, s in date_sets.items() if n != name))),
-            }
-            for name, dates in date_sets.items()
-        }
-        if debug:
-            for name, dates in date_sets.items():
-                others = set.union(*(s for n, s in date_sets.items() if n != name))
-                context[name]["only_here_dates"] = [str(d) for d in sorted(dates - others)]
+        return
 
-        _add_issue(
-            report,
-            SECTION_DATE_ALIGNMENT,
-            "warning",
-            "date_alignment_mismatch",
-            "TRI, RawPrice, and FX date sets differ.",
-            context,
-        )
-
-    for name, df in datasets.items():
-        summary = _missing_wide_summary(df, name)
-        severity = "info" if summary["missing_cells"] == 0 else "warning"
-        _add_issue(
-            report,
-            SECTION_DATE_ALIGNMENT,
-            severity,
-            f"{name}_missing_summary",
-            (
-                f"{name}: {summary['missing_cells']} missing cells "
-                f"({summary['missing_pct']}%), "
-                f"{summary['dates_with_missing']} dates affected, "
-                f"{summary['columns_with_missing']} columns affected."
+    context = {
+        name: {
+            "count": len(dates),
+            "only_here_count": len(
+                dates - set.union(*(s for n, s in date_sets.items() if n != name))
             ),
-            summary if debug else {k: summary[k] for k in summary if k != "details"},
-        )
+        }
+        for name, dates in date_sets.items()
+    }
+    if debug:
+        for name, dates in date_sets.items():
+            others = set.union(*(s for n, s in date_sets.items() if n != name))
+            context[name]["only_here_dates"] = [str(d) for d in sorted(dates - others)]
 
-
-def _column_missing_summary(df: pd.DataFrame, columns: list[str], key_col: str) -> dict[str, Any]:
-    summary: dict[str, Any] = {"columns": {}, "details": []}
-    for col in columns:
-        if col not in df.columns:
-            summary["columns"][col] = {"missing_rows": len(df), "status": "missing_column"}
-            continue
-
-        missing_mask = df[col].isna()
-        missing_rows = int(missing_mask.sum())
-        summary["columns"][col] = {"missing_rows": missing_rows}
-        if missing_rows:
-            keys = df.loc[missing_mask, key_col].tolist() if key_col in df.columns else list(missing_mask[missing_mask].index)
-            summary["details"].extend([{"key": key_col, "value": key, "column": col} for key in keys])
-
-    return summary
+    _add_issue(
+        report,
+        SECTION_DATE_ALIGNMENT,
+        "warning",
+        "date_alignment_mismatch",
+        "TRI, RawPrice, and FX date sets differ.",
+        context,
+    )
 
 
 def _check_security_master_missing(
@@ -200,8 +234,7 @@ def _check_security_master_missing(
 
         for col in skip_cols:
             populated_mask = group[col].notna()
-            count = int(populated_mask.sum())
-            if count:
+            if populated_mask.any():
                 for ticker in group.loc[populated_mask, "ticker"]:
                     unexpected_populated.append(
                         {"asset_type": asset_type_str, "ticker": str(ticker), "column": col}
@@ -209,7 +242,6 @@ def _check_security_master_missing(
 
     context: dict[str, Any] = {
         "missing_count": missing_count,
-        "skipped_missing_rules": SECURITY_MASTER_SKIP_MISSING,
         "unexpected_populated_count": len(unexpected_populated),
     }
     if debug:
@@ -219,9 +251,9 @@ def _check_security_master_missing(
     if missing_count == 0 and not unexpected_populated:
         _add_issue(
             report,
-            SECTION_SECURITY_MASTER,
+            SECTION_MISSING_VALUES,
             "info",
-            "security_master_key_missing_summary",
+            "security_master_missing_ok",
             "security_master: 0 unexpected missing values after asset-type filters.",
             context,
         )
@@ -230,7 +262,7 @@ def _check_security_master_missing(
     if missing_count:
         _add_issue(
             report,
-            SECTION_SECURITY_MASTER,
+            SECTION_MISSING_VALUES,
             "warning",
             "security_master_unexpected_missing",
             f"security_master: {missing_count} unexpected missing values after asset-type filters.",
@@ -240,7 +272,7 @@ def _check_security_master_missing(
     if unexpected_populated:
         _add_issue(
             report,
-            SECTION_SECURITY_MASTER,
+            SECTION_MISSING_VALUES,
             "warning",
             "security_master_unexpected_populated",
             (
@@ -251,46 +283,44 @@ def _check_security_master_missing(
         )
 
 
-def _check_key_column_missing(
-    data: LoadedWorkbook, report: ValidationReport, *, debug: bool
-) -> None:
-    checks = [
-        (
-            "portfolio_weights",
-            data.portfolio_weights,
-            "ticker",
-            list(data.portfolio_weights.columns),
-            "warning",
-        ),
-        (
-            "corporate_actions",
-            data.corporate_actions,
-            "ticker",
-            list(data.corporate_actions.columns),
-            "warning",
-        ),
-        (
-            "fx_local_per_usd",
-            data.fx_local_per_usd,
-            "date",
-            [col for col in data.fx_local_per_usd.columns if col != "date"],
-            "warning",
-        ),
-    ]
+def _check_missing_values(data: LoadedWorkbook, report: ValidationReport, *, debug: bool) -> None:
+    _check_security_master_missing(data, report, debug=debug)
 
-    for name, df, key_col, columns, default_severity in checks:
-        summary = _column_missing_summary(df, columns, key_col)
-        total_missing_rows = sum(item["missing_rows"] for item in summary["columns"].values())
-
-        severity = "info" if total_missing_rows == 0 else default_severity
-        context = summary if debug else {"columns": summary["columns"]}
-        _add_issue(
+    tabular_datasets = {
+        "portfolio_weights": data.portfolio_weights,
+        "corporate_actions": data.corporate_actions,
+    }
+    for name, df in tabular_datasets.items():
+        summary = _tabular_missing_summary(df, name)
+        _report_dataset_missing(
             report,
-            SECTION_KEY_MISSING,
-            severity,
-            f"{name}_key_missing_summary",
-            f"{name}: {total_missing_rows} total missing values across keyed columns.",
-            context,
+            name,
+            summary,
+            debug=debug,
+            message_fn=lambda s, n=name: (
+                f"{n}: {s['missing_cells']} missing cells, "
+                f"{s['columns_with_missing']} columns affected."
+            ),
+        )
+
+    wide_datasets = {
+        "total_return_index_local": data.total_return_index_local,
+        "raw_price_local": data.raw_price_local,
+        "fx_local_per_usd": data.fx_local_per_usd,
+    }
+    for name, df in wide_datasets.items():
+        summary = _missing_wide_summary(df, name)
+        _report_dataset_missing(
+            report,
+            name,
+            summary,
+            debug=debug,
+            message_fn=lambda s, n=name: (
+                f"{n}: {s['missing_cells']} missing cells "
+                f"({s['missing_pct']}%), "
+                f"{s['dates_with_missing']} dates affected, "
+                f"{s['columns_with_missing']} columns affected."
+            ),
         )
 
 
@@ -440,12 +470,62 @@ def _check_split_sanity(data: LoadedWorkbook, report: ValidationReport) -> None:
         )
 
 
+def _check_ticker_coverage(data: LoadedWorkbook, report: ValidationReport, *, debug: bool) -> None:
+    """Check that every portfolio_weights ticker exists in security_master, TRI, and raw_price."""
+    weight_tickers = set(data.portfolio_weights["ticker"].dropna().astype(str))
+    sm_tickers = set(data.security_master["ticker"].dropna().astype(str))
+    tri_tickers = set(data.total_return_index_local.columns) - {"date"}
+    raw_tickers = set(data.raw_price_local.columns) - {"date"}
+
+    missing_in_sm = sorted(weight_tickers - sm_tickers)
+    missing_in_tri = sorted(weight_tickers - tri_tickers)
+    missing_in_raw = sorted(weight_tickers - raw_tickers)
+
+    if not missing_in_sm and not missing_in_tri and not missing_in_raw:
+        _add_issue(
+            report,
+            SECTION_TICKER_COVERAGE,
+            "info",
+            "portfolio_weights_ticker_coverage_ok",
+            f"All {len(weight_tickers)} portfolio_weights tickers found in security_master, TRI, and raw_price.",
+            {"ticker_count": len(weight_tickers)},
+        )
+        return
+
+    context: dict[str, Any] = {
+        "missing_in_security_master_count": len(missing_in_sm),
+        "missing_in_tri_count": len(missing_in_tri),
+        "missing_in_raw_price_count": len(missing_in_raw),
+    }
+    if debug:
+        context["missing_in_security_master"] = missing_in_sm
+        context["missing_in_tri"] = missing_in_tri
+        context["missing_in_raw_price"] = missing_in_raw
+
+    parts = []
+    if missing_in_sm:
+        parts.append(f"{len(missing_in_sm)} not in security_master")
+    if missing_in_tri:
+        parts.append(f"{len(missing_in_tri)} not in TRI")
+    if missing_in_raw:
+        parts.append(f"{len(missing_in_raw)} not in raw_price")
+
+    _add_issue(
+        report,
+        SECTION_TICKER_COVERAGE,
+        "warning",
+        "portfolio_weights_ticker_coverage_mismatch",
+        f"portfolio_weights ticker coverage: {'; '.join(parts)}.",
+        context,
+    )
+
+
 def validate_raw(data: LoadedWorkbook, *, debug: bool = False) -> ValidationReport:
     """Run raw-input validation checks after loading."""
     report = ValidationReport()
-    _check_date_alignment_and_missing(data, report, debug=debug)
-    _check_security_master_missing(data, report, debug=debug)
-    _check_key_column_missing(data, report, debug=debug)
+    _check_date_alignment(data, report, debug=debug)
+    _check_missing_values(data, report, debug=debug)
+    _check_ticker_coverage(data, report, debug=debug)
     _check_weight_exposure(data, report)
     _check_split_sanity(data, report)
     return report
