@@ -170,8 +170,8 @@ def _compute_var_es(portfolio_loss: pd.DataFrame) -> dict[str, float]:
             "es_99": float("nan"),
         }
 
-    var_95 = float(losses.quantile(0.95))
-    var_99 = float(losses.quantile(0.99))
+    var_95 = float(losses.quantile(0.95, interpolation="lower"))
+    var_99 = float(losses.quantile(0.99, interpolation="lower"))
     tail_95 = losses[losses >= var_95]
     tail_99 = losses[losses >= var_99]
 
@@ -202,11 +202,13 @@ def _compute_annual_metrics(
         "es_99": {},
     }
 
-    # Compute per-year vol and MDD
+    # Compute per-year vol, MDD, and VaR/ES
     dates = pd.to_datetime(portfolio_return[WIDE_DATE_COL])
     for year in (2024, 2025):
         mask = dates.dt.year == year
         yr_ret = portfolio_return[mask].copy()
+        yr_loss = portfolio_loss[mask].copy()
+
         if yr_ret.empty or yr_ret["return"].dropna().empty:
             rows["annualized_volatility"][str(year)] = _DASH
             rows["max_drawdown"][str(year)] = _DASH
@@ -216,16 +218,20 @@ def _compute_annual_metrics(
             rows["annualized_volatility"][str(year)] = _compute_annualized_volatility(yr_ret)
             rows["max_drawdown"][str(year)] = _compute_max_drawdown(yr_dd)
 
+        if yr_loss.empty or yr_loss["loss"].dropna().empty:
+            for key in ("var_95", "var_99", "es_95", "es_99"):
+                rows[key][str(year)] = _DASH
+        else:
+            yr_risk = _compute_var_es(yr_loss)
+            for key in ("var_95", "var_99", "es_95", "es_99"):
+                rows[key][str(year)] = yr_risk[key]
+
     # Total
     _, wealth_all = _compute_wealth_curve(portfolio_return)
     dd_all = _compute_drawdown(wealth_all)
     rows["annualized_volatility"]["Total"] = _compute_annualized_volatility(portfolio_return)
     rows["max_drawdown"]["Total"] = _compute_max_drawdown(dd_all)
-
-    # VaR/ES: total only
     for key in ("var_95", "var_99", "es_95", "es_99"):
-        rows[key]["2024"] = _DASH
-        rows[key]["2025"] = _DASH
         rows[key]["Total"] = total_risk[key]
 
     return rows

@@ -22,10 +22,11 @@ _METRIC_ORDER = ["var_95", "var_99", "es_95", "es_99", "max_drawdown", "annualiz
 
 
 def _fmt(value: object) -> str:
+    """Format a decimal metric as a percentage string with 4 decimal places."""
     if value == "-":
         return "-"
     try:
-        return f"{float(value):.4f}"
+        return f"{float(value) * 100:.4f}"
     except (TypeError, ValueError):
         return str(value)
 
@@ -41,7 +42,7 @@ def build_wealth_curve_figure(result: PipelineResult) -> go.Figure:
     for i, ticker in enumerate(top5_tickers):
         fig.add_trace(go.Scatter(
             x=top5["date"],
-            y=top5[ticker],
+            y=top5[ticker] * 100,
             name=ticker,
             mode="lines",
             line=dict(width=1.5, color=_TOP5_COLORS[i % len(_TOP5_COLORS)]),
@@ -50,7 +51,7 @@ def build_wealth_curve_figure(result: PipelineResult) -> go.Figure:
 
     fig.add_trace(go.Scatter(
         x=wealth_curve["date"],
-        y=wealth_curve["wealth"],
+        y=wealth_curve["wealth"] * 100,
         name="Portfolio",
         mode="lines",
         line=dict(width=3, color=_PORTFOLIO_COLOR),
@@ -62,7 +63,7 @@ def build_wealth_curve_figure(result: PipelineResult) -> go.Figure:
     fig.update_layout(
         title="Portfolio Wealth Curve vs Top-5 Securities",
         xaxis_title="Date",
-        yaxis_title="Wealth (rebased to 1.0)",
+        yaxis_title="Wealth (% of NAV)",
         updatemenus=[
             dict(
                 type="buttons",
@@ -108,7 +109,7 @@ def build_performance_table_figure(result: PipelineResult) -> go.Figure:
 
     fig = go.Figure(go.Table(
         header=dict(
-            values=["<b>Metric</b>", "<b>2024</b>", "<b>2025</b>", "<b>Total</b>"],
+            values=["<b>Metric</b>", "<b>2024 (% of NAV)</b>", "<b>2025 (% of NAV)</b>", "<b>Total (% of NAV)</b>"],
             align="center",
             font=dict(size=13),
         ),
@@ -142,7 +143,7 @@ def build_stress_text(result: PipelineResult) -> html.Div:
     table_rows = []
     for label, formula, value in rows:
         try:
-            display = f"{float(value):+.4f}"
+            display = f"{float(value) * 100:+.4f}"
         except (TypeError, ValueError):
             display = str(value)
         table_rows.append(html.Tr([
@@ -152,7 +153,8 @@ def build_stress_text(result: PipelineResult) -> html.Div:
         ]))
 
     return html.Div([
-        html.H4("Stress Scenario Results", style={"marginBottom": "8px"}),
+        html.H4("Stress Scenario Results", style={"marginBottom": "4px"}),
+        html.P("(% of NAV)", style={"fontSize": "11px", "color": "#888", "margin": "0 0 8px 0"}),
         html.Table(
             table_rows,
             style={"width": "100%", "borderCollapse": "collapse", "fontSize": "14px"},

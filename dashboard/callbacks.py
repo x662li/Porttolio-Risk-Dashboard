@@ -98,16 +98,16 @@ def register_callbacks(app, result: PipelineResult) -> None:
                 children=[
                     html.Thead(html.Tr([
                         html.Th("Metric", style=_TABLE_HEADER),
-                        html.Th("Value", style=_TABLE_HEADER),
+                        html.Th("Value (% of NAV)", style=_TABLE_HEADER),
                     ])),
                     html.Tbody([
                         html.Tr([
                             html.Td("Net Exposure", style=_TABLE_LABEL),
-                            html.Td(f"{net:+.4f}", style=_TABLE_CELL),
+                            html.Td(f"{net * 100:+.4f}", style=_TABLE_CELL),
                         ]),
                         html.Tr([
                             html.Td("Gross Exposure", style=_TABLE_LABEL),
-                            html.Td(f"{gross:.4f}", style=_TABLE_CELL),
+                            html.Td(f"{gross * 100:.4f}", style=_TABLE_CELL),
                         ]),
                     ]),
                 ],

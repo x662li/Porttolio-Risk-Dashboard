@@ -1,4 +1,4 @@
-# Methology
+# Methodology
 
 ---
 
@@ -21,7 +21,7 @@ REQUIRED_SHEETS = (
 )
 ```
 
-then `exposure_check` is separated from `portfolio_weights` to be usded for validation.
+then `exposure_check` is separated from `portfolio_weights` to be used for validation.
 
 After loading datasets, we check if all the required columns exists and then we rename them. The renaming dictionary is stored in `config.py`.
 
@@ -63,6 +63,8 @@ After we passed validation process, we start engineering the data so that we can
 
 the dataframes we need are: `PortfolioWeights`, `SecurityMaster`, `TotalReturnIndex_Local`, and `FX_Local_per_USD`.
 
+Here we use `TotalReturnIndex_Local` instead of raw price is because TRI includes dividednd and interest reinvested return, it provides a more acurate rate of return.
+
 The formatting including:
 
 - for all strings, we trail whitespaces to make sure join works,
@@ -73,19 +75,19 @@ The formatting including:
 
 #### b. `usd_security_returns` Generation.
 
-In order to calculate risk metrics, we need to calculate daily return from `TotalReturnIndex_Local` (TRI). the formular is the following:
+In order to calculate risk metrics, we need to calculate daily return from `TotalReturnIndex_Local` (TRI). the formula is the following:
 
 $$
     r_t = \frac{TRI_t - TRI_{t-1}}{TRI_{t-1}} = \frac{TRI_t}{TRI_{t-1}} - 1
 $$
 
-However, since securities have different base currencies, we need to adjust the return base on exhange rate to get USD based daily return.
+However, since securities have different base currencies, we need to adjust the return based on exchange rate to get USD based daily return.
 
 $$
     r_t = \frac{TRI_t / FX_t}{TRI_{t-1} / FX_{t-1}} - 1
 $$
 
-Therefore, for each row, we can first join and divide by exchange rate, then calcualte the percent change. The code is shown below:
+Therefore, for each row, we can first join and divide by exchange rate, then calculate the percent change. The code is shown below:
 
 ```python
 def _calculate_usd_security_returns(
@@ -122,7 +124,7 @@ def _calculate_usd_security_returns(
 
 Since for each daily return, we need four values: $TRI_t$, $TRI_{t-1}$, $FX_t$, $FX_{t-1}$, if any value is NaN, the daily return $r_t$ is NaN. We apply this rule because any imputation will introduce fake data thus mess up our risk metrics.
 
-After this procedure, we obtai three tables for performance calcualtion: `usd_security_returns`,  `PortfolioWeights` and `SecurityMaster`.
+After this procedure, we obtain three tables for performance calculation: `usd_security_returns`,  `PortfolioWeights` and `SecurityMaster`.
 
 ---
 
@@ -135,7 +137,7 @@ After Data ETL process, we can start calculating performance metrics.
 First we need is a wealth curve, we do this for top 5 weighted securities and also the entire portfolio. We first calulated portfolio level daily return:
 
 $$
-    r_t^{portfolio} = \sum_{i} w_i * r_{i,t}
+    r_t^{portfolio} = \sum_{i} w_i \cdot r_{i,t}
 $$
 
 This is a important intermediate table.
@@ -174,19 +176,19 @@ def _compute_wealth_curve(portfolio_return: pd.DataFrame) -> tuple[pd.Series, pd
 
 ### VaR
 
-For VaR calculation, we multiply portfolio daily return by $-1$ to get portfolio daily loss, then we sort the values and take $95$ and $99$ percentile. 
+For VaR calculation, we multiply portfolio daily return by $-1$ to get portfolio daily loss, then we sort the values and take $95$ and $99$ percentile. For emprical quantil rules, lower (left) is value is selected.
 
 ### Expected Shortfall
 
 For ES calculation, we pick all the losses greater or equal to VaR95 or Var99,then we compute the mean to get ES95 and ES99. The result is rounded to 4 decimal places.
 
-### Annulized Volatility
+### Annualized Volatility
 
-Here we compute the standard deviation of the entire daily return dataset with sample degree of freedom, then we times the sqaure root of number of trading days per year (252), to obtain the annulized volatility.
+Here we compute the standard deviation of the entire daily return dataset with sample degree of freedom, then we times the square root of number of trading days per year (252), to obtain the annualized volatility.
 
 ### Max Drawdown
 
-We go down the cumulative return dataframe and compute drawdown for each day. The drawdown is computed by finding the previous peak up to $W_t$ (`cummax()`) and then find the distance to $W_t$, Then we take the min of drawndown series. the code is shown below:
+We go down the cumulative return dataframe and compute drawdown for each day. The drawdown is computed by finding the previous peak up to $W_t$ (`cummax()`) and then find the distance to $W_t$, Then we take the min of drawdown series. the code is shown below:
 
 ```python
 def _compute_drawdown(wealth: pd.Series) -> pd.Series:
@@ -247,7 +249,7 @@ def _build_exposure_fact_table(cleaned: CleanedWorkbook) -> pd.DataFrame:
     return fact
 ```
 
-An `expusre_fact_table` example is shown below:
+An `exposure_fact_table` example is shown below:
 
 | ticker  | asset_type | sector     | country | rating | weight  | long_contribution | short_contribution | net_contribution | gross_contribution |
 |---------|------------|------------|---------|--------|---------|-------------------|--------------------|------------------|--------------------|
@@ -274,14 +276,12 @@ Equity selloff only impacts equities. we apply beta of each equity to market sho
 
 $$
     r_{i}^{stress} = \beta_i \times (-\Delta m)
-
 $$
 
 here $\quad \Delta m = 15\%$, and for portfolio impact, we just apply weights and add up all equities:
 
 $$
     P^{equity} = \sum_{i \in \text{Equity}} w_i \cdot r_{i}^{stress}
-
 $$
 
 
@@ -318,7 +318,7 @@ The layout consists of 5 parts:
 - A wealth curve plot, which displays cumulative return curve portfolio and top 5 weight asset. It can be zooms in or out for details.
 - A performance metrics table, to show all risk metrics.
 - A exposure view filter, here we can apply filters and compare net and gross exposure. 
-- A Stres Scenario Results display
+- A Stress Scenario Results display
 - A Data Validation and Cleaning log panel, for fund managers and engineers to check validation results.
 
 ---
@@ -365,7 +365,7 @@ These data source mentioned above should be well maintained and stored on cloud 
 
 ### c. Application Design
 
-We can integrate this risk dashboard into existing platform as a micro service. each component (marekt value, stress test, forex, reporting...) can be a individual service built using uvvicorn serviers. and communicate to each other using grpc. Then from gateway, we use fastAPI to expose restful APIs to frontend or the platform's API gateway. Then at the backend, we query database using sqlAlchemy (postgres query to RDS ...).
+We can integrate this risk dashboard into existing platform as a micro service. each component (market value, stress test, forex, reporting...) can be a individual service built using uvicorn servers. and communicate to each other using grpc. Then from gateway, we use fastAPI to expose restful APIs to frontend or the platform's API gateway. Then at the backend, we query database using sqlAlchemy (postgres query to RDS ...).
 
 ### d. deployment
 
