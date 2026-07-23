@@ -1,76 +1,119 @@
 # Methodology
 
-## Data choices
+> Replace this file with your own methodology. Below are **formatting samples** only.
 
-- Use `TotalReturnIndex_Local` for historical performance
-- Use `RawPrice_Local` and `CorporateActions` for validation only
-- Convert local values to USD by dividing by `FX_Local_per_USD`
+---
 
-## Missing data
+## 1. Title
 
-- Do not silently forward-fill TRI or FX observations
-- Report final valid observation count
+Use one `#` for the document title (shown above as **Methodology**).
 
-## Portfolio return (Scheme B)
+Use `##` for major sections, e.g. Data Choices, Performance, Exposure, Stress Tests.
 
-- Apply signed portfolio weights to USD security returns
-- Non-zero weight set: `|weight| > 1e-12`
-- If any non-zero-weight security return is NaN on a date, portfolio return is NaN
-- Zero-weight securities are ignored and do not trigger NaN
-- Weights are not renormalized on missing days
+Use `###` for subsections within a topic.
 
-## Wealth curve
+---
 
-- Start from wealth = 1.0
-- On valid return days: `wealth_t = wealth_{t-1} * (1 + r_t)`
-- On NaN return days: wealth is NaN for that date, but compounding resumes from the last valid wealth on the next valid day
+## 2. Subtitle / Section intro
 
-## Risk metrics
+After a section heading, add a short paragraph to set context before bullets or formulas.
 
-- VaR and Expected Shortfall are reported as positive loss percentages (`loss = -return`)
-- VaR uses empirical quantiles with pandas linear interpolation
-- ES is the mean of losses in the tail at or above the VaR threshold
-- Annualized volatility uses sample standard deviation (`ddof=1`) scaled by `sqrt(252)`
-- Maximum drawdown is computed from compounded wealth peaks, not summed returns
+### Example subsection
 
-## Exposure and stress
+This section describes how portfolio daily returns are computed from security-level USD returns and signed weights.
 
-- Preserve signed weights; reconcile net, gross, long, and short exposure
-- Preserve equity ratings marked `NR`
-- Use supplied equity, rate, and combined stress scenarios
+---
 
-### Exposure fact table
+## 3. Bullet points
 
-The canonical security-level exposure data source is `exposure_fact_table`, a DataFrame with 10 columns and one row per security (300 rows in production).
+Use `-` for unordered lists. Keep one idea per bullet; use nested bullets for details.
 
-Column definitions:
+- Main assumption or data source
+- Key rule or convention
+- Edge-case handling
+  - Sub-point: what happens when data is missing
+  - Sub-point: what is excluded from the calculation
 
-| Column | Description |
-|---|---|
-| `ticker` | Security identifier |
-| `asset_type` | Asset class (Equity, Bond, Loan) |
-| `sector` | Industry sector |
-| `country` | Country of domicile |
-| `rating` | Credit rating; `NR` is preserved for unrated equities |
-| `weight` | Signed portfolio weight (negative = short), rounded to 4 d.p. |
-| `long_contribution` | `weight` if `weight > 0`, else `0` |
-| `short_contribution` | `weight` if `weight < 0`, else `0` |
-| `net_contribution` | `long_contribution + short_contribution` (equals signed weight) |
-| `gross_contribution` | `abs(weight)` |
+**Bold** for emphasis; `` `inline code` `` for column names, parameters, or file paths.
 
-Zero-weight rows are included with all contribution columns set to zero.
+---
 
-Portfolio-level identities that must hold (tolerance ±0.01):
+## 4. LaTeX formulas
 
-```text
-Σ net_contribution   ≈ Σ weight
-Σ gross_contribution ≈ Σ |weight|
-Σ short_contribution ≈ Σ min(weight, 0)
+GitHub and most Markdown viewers render math with `$...$` (inline) or `$$...$$` (block).
+
+Inline example: portfolio return on day $t$ is $r_{p,t} = \sum_i w_i \, r_{i,t}$.
+
+Block example — annualized volatility:
+
+$$
+\sigma_{\text{annual}} = \sigma_{\text{daily}} \sqrt{252}
+$$
+
+Block example — sample variance ($n$ observations, $ddof = 1$):
+
+$$
+s^2 = \frac{1}{n - 1} \sum_{t=1}^{n} (r_t - \bar{r})^2
+$$
+
+Block example — rate shock (bond/loan):
+
+$$
+\Delta P/P \approx -D \,\Delta y + \tfrac{1}{2} C \,(\Delta y)^2
+$$
+
+Tips:
+- Use `\text{...}` for words inside formulas: `\sigma_{\text{daily}}`
+- Subscripts: `r_{i,t}`; fractions: `\frac{a}{b}`; sums: `\sum_{i=1}^{n}`
+
+---
+
+## 5. Code blocks
+
+Use fenced blocks with a language tag for syntax highlighting, or `text` for pseudo-code / formulas.
+
+**Python (implementation reference):**
+
+```python
+portfolio_return = (security_returns * weights).sum(axis=1)
+annualized_vol = daily_returns.std(ddof=1) * (252 ** 0.5)
 ```
 
-The fact table is the canonical source for Dash interactive aggregation (Phase 2). Dimensional aggregates (e.g. net exposure by sector) are derived on demand via `groupby` rather than pre-materialised.
+**Plain text (identities or pseudo-code):**
 
-## Testing and production scaling
+```text
+net_exposure   = sum(net_contribution)
+gross_exposure = sum(gross_contribution)
+```
 
-- Unit tests on pure quantitative modules with synthetic fixtures
-- Production scaling notes to be added here
+**Shell (commands, if relevant):**
+
+```bash
+python app.py
+```
+
+---
+
+## 6. Optional: tables
+
+| Column | Description |
+|--------|-------------|
+| `ticker` | Security identifier |
+| `weight` | Signed portfolio weight |
+
+---
+
+## 7. Suggested outline for your write-up
+
+Delete everything above and fill in sections such as:
+
+1. **Data & cleaning** — sources, FX conversion, missing data policy
+2. **Portfolio return** — weighting scheme, NaN rules
+3. **Performance** — wealth curve, VaR/ES, volatility, drawdown
+4. **Exposure** — signed weights, fact table, aggregation
+5. **Stress tests** — equity selloff, rate shock, combined scenario
+6. **Assumptions & limitations** — what you chose and why
+
+---
+
+*End of formatting samples.*
